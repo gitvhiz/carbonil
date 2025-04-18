@@ -1,12 +1,7 @@
-close all; 
-clear; 
-clc
-
-% ===========================================================
+%% ===========================================================
 %                VIDEO PROCESSING AND FRAME SPLITTING
 % ===========================================================
-
-
+close all; clear; clc;
 
 % ================================================
 %                READ VIDEO FILE
@@ -95,7 +90,7 @@ end
 %                    REMOVING BACKGROUND SIGNAL
 % ========================================================
 
-for frameIdx = 1:3
+for frameIdx = 1:numFrames
     currentFrame = Im{frameIdx};
 
     % Computing average map
@@ -225,4 +220,208 @@ for frameIdx = 1:3
 
 end
 
-disp('Done! Open each frame in the analysis folder to view bubble parameters')
+% --------- PARAMETERS ---------
+inputVideoFile = 'purple_video.mp4';
+outputFolder = 'purple_video_frames';
+frameMatFile = 'purple_video_frames.mat';
+frameRate = 960;         % frames per second
+pixelsPerMm = 10;        % adjust as needed for your scale
+maxInvisibleFrames = 30; % frames a track can be invisible before deletion
+minVisibleCount = 5;     % minimum visible frames before a track is valid
+distanceThreshold = 50;  % max distance (pixels) for assignment
+
+%% --------- READ VIDEO AND SAVE FRAMES ---------
+% vidReader = VideoReader(inputVideoFile);
+% if ~exist(outputFolder, 'dir'), mkdir(outputFolder); end
+% 
+% frameIndex = 0;
+% Im = {};
+% while hasFrame(vidReader)
+%     vidFrame = readFrame(vidReader);
+%     frameIndex = frameIndex + 1;
+%     frameFileName = fullfile(outputFolder, sprintf('frame_%04d.png', frameIndex));
+%     imwrite(vidFrame, frameFileName);
+%     Im{frameIndex} = im2double(rgb2gray(vidFrame));
+% end
+% numFrames = frameIndex;
+% save(frameMatFile, 'Im', '-v7.3');
+
+%% =======================================================
+%              BUBBLE TRACKING ALGORITHM
+% =======================================================
+% Load frames if not already in workspace
+if ~exist('Im','var')
+    load(frameMatFile, 'Im');
+    numFrames = numel(Im);
+end
+
+% Initialize tracking structures
+tracks = struct('id', {}, 'kalmanFilter', {}, 'age', {}, 'totalVisibleCount', {}, ...
+    'consecutiveInvisibleCount', {}, 'centroids', {}, 'trajectory', {}, 'velocity', {});
+nextId = 1;
+
+trackingFolder = fullfile(outputFolder, 'tracking');
+if ~exist(trackingFolder, 'dir'), mkdir(trackingFolder); end
+
+for frameIdx = 1:numFrames
+    frame = Im{frameIdx};
+    [centroids, bboxes, mask] = detectBubbles(frame);
+
+    % Predict new locations of tracks
+    for i = 1:length(tracks)
+        predictedCentroid = predict(tracks(i).kalmanFilter);
+        tracks(i).centroids = [tracks(i).centroids; predictedCentroid];
+    end
+
+    % Assign detections to tracks using Hungarian algorithm
+    nTracks = length(tracks);
+    nDetections = size(centroids,1);
+    cost = zeros(nTracks, nDetections);
+    for i = 1:nTracks
+        for j = 1:nDetections
+            cost(i,j) = norm(tracks(i).centroids(end,:) - centroids(j,:));
+        end
+    end
+    cost(cost > distanceThreshold) = Inf; % ignore distant assignments
+    [assignments, unassignedTracks, unassignedDetections] = assignDetectionsToTracks(cost);
+
+% Update assigned tracks
+for k = 1:size(assignments,1)
+    trackIdx = assignments(k,1);
+    detectionIdx = assignments(k,2);
+    correct(tracks(trackIdx).kalmanFilter, centroids(detectionIdx,:));
+    tracks(trackIdx).centroids = [tracks(trackIdx).centroids; centroids(detectionIdx,:)];
+    tracks(trackIdx).trajectory = [tracks(trackIdx).trajectory; centroids(detectionIdx,:)];
+    tracks(trackIdx).totalVisibleCount = tracks(trackIdx).totalVisibleCount + 1;
+    tracks(trackIdx).consecutiveInvisibleCount = 0;
+    % --- Velocity calculation in mm/s ---
+    if size(tracks(trackIdx).centroids,1) > 1
+        dt = 1/frameRate; % seconds between frames
+        % Displacement in pixels between last two centroids
+        dpix = norm(tracks(trackIdx).centroids(end,:) - tracks(trackIdx).centroids(end-1,:));
+        % Convert pixels to mm
+        dmm = dpix / pixelsPerMm;
+        % Velocity in mm/s
+        v_mmps = dmm / dt;
+        tracks(trackIdx).velocity = v_mmps;
+    else
+        tracks(trackIdx).velocity = 0;
+    end
+end
+
+
+    % Update unassigned tracks
+    for i = 1:length(unassignedTracks)
+        ind = unassignedTracks(i);
+        tracks(ind).consecutiveInvisibleCount = tracks(ind).consecutiveInvisibleCount + 1;
+        tracks(ind).centroids = [tracks(ind).centroids; tracks(ind).centroids(end,:)];
+        tracks(ind).trajectory = [tracks(ind).trajectory; tracks(ind).centroids(end,:)];
+    end
+
+    % Delete lost tracks
+    lost = [];
+    for i = 1:length(tracks)
+        if tracks(i).consecutiveInvisibleCount >= maxInvisibleFrames
+            lost = [lost i];
+        end
+    end
+    tracks(lost) = [];
+
+    % Create new tracks for unassigned detections
+    for i = 1:length(unassignedDetections)
+        centroid = centroids(unassignedDetections(i),:);
+        kf = configureKalmanFilter('ConstantVelocity', centroid, [1 1], [1 1], 1);
+        newTrack = struct(...
+            'id', nextId, ...
+            'kalmanFilter', kf, ...
+            'age', 1, ...
+            'totalVisibleCount', 1, ...
+            'consecutiveInvisibleCount', 0, ...
+            'centroids', centroid, ...
+            'trajectory', centroid, ...
+            'velocity', 0);
+        tracks(end+1) = newTrack;
+        nextId = nextId + 1;
+    end
+
+    % Display and save results
+    % Display and save results
+    displayTrackingResults(frame, tracks, bboxes, mask, frameIdx, minVisibleCount);
+    saveas(gcf, fullfile(trackingFolder, sprintf('frame_%04d_tracking.png', frameIdx)));
+    close gcf
+    fprintf('Tracking: Processed frame %d/%d\n', frameIdx, numFrames);
+end
+
+%% ========================= FUNCTIONS =========================
+
+function [centroids, bboxes, mask] = detectBubbles(frame)
+    % Enhance contrast and remove background
+    frame = adapthisteq(frame);
+    background = imgaussfilt(frame, 10);
+    foreground = frame - background;
+    % Threshold and clean up
+    thresh = graythresh(foreground);
+    mask = imbinarize(foreground, thresh*0.8);
+    mask = bwareaopen(mask, 10);
+    mask = imclose(mask, strel('disk',3));
+    mask = imfill(mask, 'holes');
+    % Get properties
+    stats = regionprops(mask, 'Centroid', 'BoundingBox');
+    if isempty(stats)
+        centroids = [];
+        bboxes = [];
+    else
+        centroids = cat(1, stats.Centroid);
+        bboxes = cat(1, stats.BoundingBox);
+    end
+end
+
+function [assignments, unassignedTracks, unassignedDetections] = assignDetectionsToTracks(cost)
+    [assignments, unassignedTracks, unassignedDetections] = deal([]);
+    if isempty(cost)
+        unassignedTracks = 1:size(cost,1);
+        unassignedDetections = 1:size(cost,2);
+        return;
+    end
+    [assignment,~] = munkres(cost);
+    for i = 1:length(assignment)
+        if assignment(i) > 0 && cost(i,assignment(i)) < Inf
+            assignments = [assignments; i, assignment(i)];
+        else
+            unassignedTracks = [unassignedTracks; i];
+        end
+    end
+    for j = 1:size(cost,2)
+        if ~ismember(j, assignment(assignment>0))
+            unassignedDetections = [unassignedDetections; j];
+        end
+    end
+end
+
+% Download munkres.m from:
+% https://www.mathworks.com/matlabcentral/fileexchange/20652-munkres-assignment-algorithm
+
+function displayTrackingResults(frame, tracks, bboxes, mask, frameIdx, minVisibleCount)
+    figure('Visible','off','Position',[100 100 1280 720]);
+    subplot(1,2,1);
+    imshow(frame,[]);
+    hold on;
+    for i = 1:length(tracks)
+        if tracks(i).totalVisibleCount < minVisibleCount, continue; end
+        plot(tracks(i).trajectory(:,1), tracks(i).trajectory(:,2), 'g-', 'LineWidth', 2);
+        plot(tracks(i).centroids(end,1), tracks(i).centroids(end,2), 'ro', 'MarkerSize', 8, 'LineWidth',2);
+        text(tracks(i).centroids(end,1)+10, tracks(i).centroids(end,2), ...
+            sprintf('ID:%d V:%.1f mm/s', tracks(i).id, tracks(i).velocity), ...
+            'Color','yellow','FontSize',10,'FontWeight','bold');
+    end
+    for k = 1:size(bboxes,1)
+        rectangle('Position',bboxes(k,:),'EdgeColor','cyan','LineWidth',1);
+    end
+    title(sprintf('Tracking Results - Frame %d', frameIdx));
+    hold off;
+
+    subplot(1,2,2);
+    imshow(mask,[]);
+    title('Bubble Mask');
+end
+

@@ -8,4 +8,6 @@ The above code also includes a function wherein bubbles are tracked frame by fra
 
 A separate code file deals with calculating the average strain of bubbles in each frame. A strain-time graph is plotted to showcase this variation as well.
 
-In certain videos where the photobioreactor takes up a relatively small amount of screen real estate as compared to the background, a commented-out section which deals with contiguity based filtering has also been included, wherein additional processing is performed on the binarized image.  
+In certain videos where the photobioreactor takes up a relatively small amount of screen real estate as compared to the background, a commented-out section which deals with contiguity based filtering has also been included, wherein additional processing is performed on the binarized image.
+
+Sample video files (slowed down to 960 fps) have been provided. These video samples are what we validated the code on.

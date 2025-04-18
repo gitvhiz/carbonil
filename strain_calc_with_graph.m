@@ -7,7 +7,7 @@ videoAxes = subplot(1, 2, 1);
 plotAxes = subplot(1, 2, 2);
 
 % Initialize variables
-initialLength = 100; % Set this to your initial gauge length
+initialLength = 100; % Set this to your initial gauge length (in mm)
 frameInterval = round(videoReader.FrameRate); % Update strain every second
 frameCount = 0;
 currentStrain = 0;
@@ -16,13 +16,25 @@ currentStrain = 0;
 hold(plotAxes, 'on');
 strainLine = animatedline(plotAxes, 'Color', 'b', 'LineWidth', 2);
 xlabel(plotAxes, 'Time (s)');
-ylabel(plotAxes, 'Strain');
-title(plotAxes, 'Strain vs Time');
+ylabel(plotAxes, 'Strain Magnitude');
+title(plotAxes, 'Absolute Strain vs Time');
 grid(plotAxes, 'on');
+yline(plotAxes, 0, 'k--', 'LineWidth', 1); % Add only once
 
 % Initialize min and max strain for dynamic y-axis scaling
 minStrain = 0;
 maxStrain = 0;
+
+% Display first frame for initialization
+if hasFrame(videoReader)
+    frame = readFrame(videoReader);
+    imHandle = imshow(frame, 'Parent', videoAxes);
+    title(videoAxes, 'Video');
+    frameCount = 1;
+end
+
+% Reset video to start
+videoReader.CurrentTime = 0;
 
 % Process the video
 while hasFrame(videoReader)
@@ -35,7 +47,7 @@ while hasFrame(videoReader)
         currentLength = calculateCurrentLength(frame);
         
         % Calculate strain
-        currentStrain = (currentLength - initialLength) / initialLength;
+        currentStrain = abs((currentLength - initialLength) / initialLength);
         
         % Update min and max strain
         minStrain = min(minStrain, currentStrain);
@@ -43,28 +55,30 @@ while hasFrame(videoReader)
         
         % Add point to the animated line
         addpoints(strainLine, currentTime, currentStrain);
-        
 
-        % Update plot axes limits
+        % Update plot axes limits (ensure a reasonable range)
         xlim(plotAxes, [0, currentTime]);
-        yRange = max(abs(minStrain), abs(maxStrain));
-        ylim(plotAxes, [min(minStrain*1.1, -0.001), max(maxStrain*1.1, 0.001)]); % Ensure proper y-axis limits for both positive and negative strains
-        drawnow;
-        
-        % Ensure the y-axis includes zero
-        yline(plotAxes, 0, 'k--', 'LineWidth', 1);
+        yPad = 0.01; % Minimum padding for y-axis
+        yMin = min(-yPad, minStrain*1.1);
+        yMax = max(yPad, maxStrain*1.1);
+        ylim(plotAxes, [yMin, yMax]);
+        drawnow limitrate;
     end
     
     % Display strain on the frame
     strainText = sprintf('Strain: %.4f', currentStrain);
     frame = insertText(frame, [10 10], strainText, 'FontSize', 18, 'BoxColor', 'white', 'BoxOpacity', 0.4, 'TextColor', 'black');
     
-    % Display the frame
-    imshow(frame, 'Parent', videoAxes);
+    % Update the frame in the video axes
+    if exist('imHandle', 'var') && ishandle(imHandle)
+        set(imHandle, 'CData', frame);
+    else
+        imHandle = imshow(frame, 'Parent', videoAxes);
+    end
     title(videoAxes, 'Video');
     
     % Force MATLAB to draw the updated figure
-    drawnow
+    drawnow limitrate
     
     % Pause to control playback speed (adjust as needed)
     pause(1/videoReader.FrameRate);
@@ -103,6 +117,10 @@ function length = calculateCurrentLength(frame)
     % Return the mean diameter as the current length
     length = meanDiameter;
 end
+
+
+
+
 
 
 

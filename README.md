@@ -6,7 +6,7 @@ A video file has to be supplied in the initial section of the code titled "BUBBL
 
 The above code also includes a function wherein bubbles are tracked frame by frame, and a bounding box is drawn around each identified bubble, with the resulting frames stored in the "Tracking" subdirectory. The Hungarian algorithm is used for this purpose.
 
-A separate code file deals with calculating the average strain of bubbles in each frame. A strain-time graph is plotted to showcase this variation as well.
+A separate code file "strain_calc_with_graph.m" deals with calculating the average strain of bubbles in each frame. A strain-time graph is plotted to showcase this variation as well.
 
 In certain videos where the photobioreactor takes up a relatively small amount of screen real estate as compared to the background, a commented-out section which deals with contiguity based filtering has also been included, wherein additional processing is performed on the binarized image.
 

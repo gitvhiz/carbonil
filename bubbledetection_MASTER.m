@@ -90,7 +90,14 @@ end
 %                    REMOVING BACKGROUND SIGNAL
 % ========================================================
 
-for frameIdx = 1:numFrames
+numOutputFrames = 5;
+interval = floor(numFrames / (numOutputFrames - 1));
+outputFrames = 1:interval:numFrames;
+outputFrames(end) = numFrames; % end frame should be last frame
+
+%for frameIdx = 1:5
+for idx = 1:length(outputFrames)
+    frameIdx = outputFrames(idx);
     currentFrame = Im{frameIdx};
 
     % Computing average map
@@ -345,11 +352,12 @@ end
     end
 
     % Display and save results
-    % Display and save results
-    displayTrackingResults(frame, tracks, bboxes, mask, frameIdx, minVisibleCount);
-    saveas(gcf, fullfile(trackingFolder, sprintf('frame_%04d_tracking.png', frameIdx)));
-    close gcf
-    fprintf('Tracking: Processed frame %d/%d\n', frameIdx, numFrames);
+    if ismember(frameIdx, outputFrames)
+        displayTrackingResults(frame, tracks, bboxes, mask, frameIdx, minVisibleCount);
+        saveas(gcf, fullfile(trackingFolder, sprintf('frame_%04d_tracking.png', frameIdx)));
+        close gcf
+        fprintf('Tracking: Processed frame %d/%d\n', frameIdx, numFrames);
+    end
 end
 
 %% ========================= FUNCTIONS =========================
@@ -401,19 +409,19 @@ end
 % Download munkres.m from:
 % https://www.mathworks.com/matlabcentral/fileexchange/20652-munkres-assignment-algorithm
 
-function displayTrackingResults(frame, tracks, bboxes, mask, frameIdx, minVisibleCount)
+function displayTrackingResults(frame, ~, bboxes, mask, frameIdx, minVisibleCount)
     figure('Visible','off','Position',[100 100 1280 720]);
     subplot(1,2,1);
     imshow(frame,[]);
     hold on;
-    for i = 1:length(tracks)
-        if tracks(i).totalVisibleCount < minVisibleCount, continue; end
-        plot(tracks(i).trajectory(:,1), tracks(i).trajectory(:,2), 'g-', 'LineWidth', 2);
-        plot(tracks(i).centroids(end,1), tracks(i).centroids(end,2), 'ro', 'MarkerSize', 8, 'LineWidth',2);
-        text(tracks(i).centroids(end,1)+10, tracks(i).centroids(end,2), ...
-            sprintf('ID:%d V:%.1f mm/s', tracks(i).id, tracks(i).velocity), ...
-            'Color','yellow','FontSize',10,'FontWeight','bold');
-    end
+    % for i = 1:length(tracks)
+    %     if tracks(i).totalVisibleCount < minVisibleCount, continue; end
+    %     plot(tracks(i).trajectory(:,1), tracks(i).trajectory(:,2), 'g-', 'LineWidth', 2);
+    %     plot(tracks(i).centroids(end,1), tracks(i).centroids(end,2), 'ro', 'MarkerSize', 8, 'LineWidth',2);
+    %     text(tracks(i).centroids(end,1)+10, tracks(i).centroids(end,2), ...
+    %         sprintf('ID:%d V:%.1f mm/s', tracks(i).id, tracks(i).velocity), ...
+    %         'Color','yellow','FontSize',10,'FontWeight','bold');
+    % end
     for k = 1:size(bboxes,1)
         rectangle('Position',bboxes(k,:),'EdgeColor','cyan','LineWidth',1);
     end
